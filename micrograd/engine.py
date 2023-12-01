@@ -1,3 +1,5 @@
+import math
+import numpy as np
 
 class Value:
     """ stores a single scalar value and its gradient """
@@ -39,6 +41,25 @@ class Value:
         def _backward():
             self.grad += (other * self.data**(other-1)) * out.grad
         out._backward = _backward
+
+        return out
+
+    def exp(self):
+        e = math.exp(1)
+        out = Value(e**self.data, (self,), 'exp')
+
+        def _backward():
+            self.gard += out.data * out.grad
+        out._backward = _backward
+
+        return out
+    
+    def tanh(self):
+        out = Value(np.tanh(self.data))
+
+        def _backward():
+            self.grad += (1 - out.data ** 2) * out.grad
+        out.backward = _backward
 
         return out
 
