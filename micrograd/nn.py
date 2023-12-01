@@ -18,9 +18,14 @@ class Neuron(Module):
         self.b = Value(0)
         self.nonlin = nonlin
 
+    # TODO: make neurons take batches
     def __call__(self, x):
+        dim = x.shape[0]
+        if len(x.shape)==2:
+            dim = x.shape[1]
+        assert dim == len(self.w), f"input shape to neuron mismatch, expected {len(self.w)} but got {dim}"
         act = sum((wi*xi for wi,xi in zip(self.w, x)), self.b)
-        return act.relu() if self.nonlin else act
+        return act.tanh() if self.nonlin else act
 
     def parameters(self):
         return self.w + [self.b]
@@ -35,7 +40,7 @@ class Layer(Module):
 
     def __call__(self, x):
         out = [n(x) for n in self.neurons]
-        return out[0] if len(out) == 1 else out
+        return out[0] if len(out) == 1 else np.array(out)
 
     def parameters(self):
         return [p for n in self.neurons for p in n.parameters()]
@@ -110,8 +115,10 @@ class Convolution(Module):
                 output[:, :, h, w] = np.sum(receptive_field * temp_weights, axis=(2, 3, 4)) + self.biases
 
         if self.nonlin:
-            relu_output = np.vectorize(lambda x: x.relu())
-            output = relu_output(output)
+            # relu_output = np.vectorize(lambda x: x.relu())
+            # output = relu_output(output)
+            tanh_output = np.vectorize(lambda x: x.tanh())
+            output = tanh_output(output)
         return output
 
     def _pad(self, x):
@@ -133,3 +140,28 @@ class Convolution(Module):
     
     def __repr__(self):
         return f"{'ReLU' if self.nonlin else 'Linear'} Convolution with shape=({self.weights.shape}), padding=({self.padding}), stride=({self.stride})"
+
+class CNN(Module):
+
+    def __init__(self, conv_layers, mlp, is_softmax=True):
+        self.conv_layers = conv_layers
+        self.mlp = mlp
+        self.is_softmax = is_softmax
+
+    def __call__(self, x):
+        for i in range(len(self.conv_layers)):
+            x = self.conv_layers[i](x)
+        x = x.flatten()
+        x = self.mlp(x)
+        if self.is_softmax:
+            x = self._softmax(x)
+        return x
+
+    def _softmax(self, x):
+        return np.exp(x)/sum(np.exp(x))
+
+    def parameters(self):
+        return [p for conv in self.conv_layers for p in conv.parameters()].extend(self.mlp.parameters())
+
+    def __repr__(self):
+        return f"{'Softmax' if self.is_softmax else ''} CNN of convs [{', '.join(str(conv) for conv in self.conv_layers)}] and mlp [{str(self.mlp)}]"
