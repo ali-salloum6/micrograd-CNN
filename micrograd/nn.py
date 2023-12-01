@@ -1,7 +1,6 @@
 import random
-from engine import Value
+from micrograd.engine import Value
 import numpy as np
-import itertools
 
 class Module:
 
@@ -63,59 +62,77 @@ class MLP(Module):
 
 class Convolution(Module):
 
-    def __init__(self, size, n_channels, padding=0, stride=1, nonlin=True):
-        self.w = np.array([[[Value(random.uniform(-1,1)) for _ in range(n_channels)] for _ in range(size)] for _ in range(size)])
-        self.b = Value(0)
-        self.n_channels = n_channels
-        self.size = size
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, nonlin=True):
+
+        self.weights = np.empty((out_channels, in_channels, kernel_size, kernel_size), dtype=Value)
+        for i in range(out_channels):
+            single_kernel = [Value(random.uniform(-1,1)) for _ in range(in_channels*(kernel_size**2))]
+            self.weights[i] = np.reshape(np.array(single_kernel),(in_channels, kernel_size, kernel_size))
+
+        self.biases = [Value(random.uniform(-1,1)) for _ in range(out_channels)]
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
         self.padding = padding
         self.stride = stride
         self.nonlin = nonlin
 
-    def __call__(self, x):
-        if len(x.shape) == 2:
-            x = np.expand_dims(x, axis=2)
-        assert x.shape[2] == self.n_channels, 'shape mismatch, the number of channels of input isn\'t equal to the conv channels'
-        padded = self._pad(x)
-        output_dims = (np.floor((padded.shape[0] - self.size + 1.0) / self.stride).astype(int),
-                        np.floor((padded.shape[1] - self.size + 1.0) / self.stride).astype(int))
-        output = np.zeros(output_dims, dtype=Value)
-        for i in range(output_dims[0]):
-            for j in range(output_dims[1]):
-                starting_i = i * self.stride
-                starting_j = j * self.stride
-                sub_image = padded[starting_i : starting_i + self.size, starting_j : starting_j + self.size, :]
-                output[i][j] = np.sum(np.multiply(sub_image, self.w)) + self.b
+    """
+        input shape (N, C, H, W) or (C, H, W) where:
+            N: batch size
+            C: number of channels
+            H: height
+            W: width
+    """
+    def __call__(self, input):
+
+        assert len(input.shape) == 3 or len(input.shape) == 4, 'The input must be either 4D (batched) or 3D (unbatched)'
+
+        if len(input.shape) == 3:
+            input = np.expand_dims(input, axis=0)
+
+        padded = self._pad(input)
+        
+        batch_size, in_channels, height, width = padded.shape
+        
+        def calculate_dim(input_dim):
+            return np.floor((input_dim - self.kernel_size) / self.stride).astype(int) + 1
+
+        output_dims = (batch_size, self.out_channels, calculate_dim(height), calculate_dim(width))
+        output = np.empty(output_dims, dtype=Value)
+
+        for batch in range(output.shape[0]):
+            single_image = padded[batch]
+            for out_channel in range(output.shape[1]):
+                convolution = self.weights[out_channel]
+                bias = self.biases[out_channel]
+                for h in range(output.shape[2]):
+                    for w in range(output.shape[3]):
+                        receptive_field = single_image[:, h : h + self.kernel_size, w : w + self.kernel_size]
+                        output[batch, out_channel, h, w] = np.sum(receptive_field * convolution) + bias
+
+        if self.nonlin:
+            relu_output = np.vectorize(lambda x: x.relu())
+            output = relu_output(output)
         return output
 
     def _pad(self, x):
-        h, w, c = x.shape
-        horizontal_zeros = np.zeros((self.padding, w, c),dtype=Value)
-        x = np.append(horizontal_zeros, x, axis=0)
-        x = np.append(x, horizontal_zeros, axis=0)
-        vertical_zeros = np.zeros((h + self.padding*2, self.padding, c),dtype=Value)
-        x = np.append(vertical_zeros, x, axis=1)
-        x = np.append(vertical_zeros, x, axis=1)
+        n, c, h, w = x.shape
+
+        horizontal_zeros = np.zeros((n, c, self.padding, w), dtype=Value)
+        x = np.append(horizontal_zeros, x, axis=2)
+        x = np.append(x, horizontal_zeros, axis=2)
+        vertical_zeros = np.zeros((n, c, h + self.padding*2, self.padding), dtype=Value)
+        x = np.append(vertical_zeros, x, axis=3)
+        x = np.append(x, vertical_zeros, axis=3)
+
         return x
 
     def parameters(self):
-        w_1d = self.w.flatten()
+        w_1d = self.weights.flatten()
         params = np.append(w_1d,self.b)
         return params
-
-np.random.seed(1337)
-random.seed(1337)
-conv = Convolution(1, 1, padding=0, stride=1)
-# x = np.array([[[1,2,3],[1,2,3]],
-#               [[1,2,3],[1,2,3]],
-#               [[1,2,3],[1,2,3]],
-#               [[1,2,3],[1,2,3]]
-#               ])
-
-# x = np.array([[[1,1],[1,2]],[[1,1],[1,2]]])
-# x = np.array[[1,1,1],[1,2,3]])
-x = np.array([[1,2],[3,4]])
-# x = np.array([[3]])
-conv(x)
-print(conv.parameters())
-
+    
+    def __repr__(self):
+        return f"{'ReLU' if self.nonlin else 'Linear'} Convolution with shape=({self.weights.shape}), padding=({self.padding}), stride=({self.stride})"

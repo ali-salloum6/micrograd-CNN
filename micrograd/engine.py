@@ -90,5 +90,15 @@ class Value:
     def __rtruediv__(self, other): # other / self
         return other * self**-1
 
+    def __gt__(self, other):
+        other = other if isinstance(other, Value) else Value(other)
+        out = Value(self.data if self.data > other.data else other.data, (self,other), '>')
+
+        def _backward():
+            self.grad += (out.data == self.data) * out.grad
+        out._backward = _backward
+
+        return out
+
     def __repr__(self):
         return f"Value(data={self.data}, grad={self.grad})"
