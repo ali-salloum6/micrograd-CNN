@@ -102,15 +102,12 @@ class Convolution(Module):
         output_dims = (batch_size, self.out_channels, calculate_dim(height), calculate_dim(width))
         output = np.empty(output_dims, dtype=Value)
 
-        for batch in range(output.shape[0]):
-            single_image = padded[batch]
-            for out_channel in range(output.shape[1]):
-                convolution = self.weights[out_channel]
-                bias = self.biases[out_channel]
-                for h in range(output.shape[2]):
-                    for w in range(output.shape[3]):
-                        receptive_field = single_image[:, h : h + self.kernel_size, w : w + self.kernel_size]
-                        output[batch, out_channel, h, w] = np.sum(receptive_field * convolution) + bias
+        for h in range(output.shape[2]):
+            for w in range(output.shape[3]):
+                receptive_field = padded[:, :, h : h + self.kernel_size, w : w + self.kernel_size]
+                temp_weights = np.expand_dims(self.weights, axis=0)
+                receptive_field = np.expand_dims(receptive_field, axis=1)
+                output[:, :, h, w] = np.sum(receptive_field * temp_weights, axis=(2, 3, 4)) + self.biases
 
         if self.nonlin:
             relu_output = np.vectorize(lambda x: x.relu())
