@@ -18,14 +18,14 @@ class Neuron(Module):
         self.b = Value(0)
         self.nonlin = nonlin
 
-    # TODO: make neurons take batches
     def __call__(self, x):
         dim = x.shape[0]
         if len(x.shape)==2:
             dim = x.shape[1]
         assert dim == len(self.w), f"input shape to neuron mismatch, expected {len(self.w)} but got {dim}"
-        act = sum((wi*xi for wi,xi in zip(self.w, x)), self.b)
-        return act.tanh() if self.nonlin else act
+        act = np.dot(x, self.w) + self.b
+        tanh_output = np.vectorize(lambda x: x.tanh())
+        return tanh_output(act) if self.nonlin else act
 
     def parameters(self):
         return self.w + [self.b]
@@ -39,7 +39,8 @@ class Layer(Module):
         self.neurons = [Neuron(nin, **kwargs) for _ in range(nout)]
 
     def __call__(self, x):
-        out = [n(x) for n in self.neurons]
+        out = np.array([n(x) for n in self.neurons])
+        out = np.transpose(out)
         return out[0] if len(out) == 1 else np.array(out)
 
     def parameters(self):
@@ -74,7 +75,7 @@ class Convolution(Module):
             single_kernel = [Value(random.uniform(-1,1)) for _ in range(in_channels*(kernel_size**2))]
             self.weights[i] = np.reshape(np.array(single_kernel),(in_channels, kernel_size, kernel_size))
 
-        self.biases = [Value(random.uniform(-1,1)) for _ in range(out_channels)]
+        self.biases = np.array([Value(random.uniform(-1,1)) for _ in range(out_channels)])
 
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -135,7 +136,7 @@ class Convolution(Module):
 
     def parameters(self):
         w_1d = self.weights.flatten()
-        params = np.append(w_1d,self.b)
+        params = np.append(w_1d, self.biases)
         return params
     
     def __repr__(self):
@@ -151,17 +152,21 @@ class CNN(Module):
     def __call__(self, x):
         for i in range(len(self.conv_layers)):
             x = self.conv_layers[i](x)
-        x = x.flatten()
+        if len(x.shape) == 4:
+            x = x.reshape(x.shape[0], -1)
+        else:
+            x = x.flatten()
         x = self.mlp(x)
         if self.is_softmax:
             x = self._softmax(x)
         return x
 
     def _softmax(self, x):
-        return np.exp(x)/sum(np.exp(x))
+        denominator = np.sum(np.exp(x), axis=1, keepdims=True) if len(x.shape) == 2 else np.sum(np.exp(x))
+        return np.exp(x)/denominator
 
     def parameters(self):
-        return [p for conv in self.conv_layers for p in conv.parameters()].extend(self.mlp.parameters())
+        return np.append([p for conv in self.conv_layers for p in conv.parameters()], self.mlp.parameters())
 
     def __repr__(self):
         return f"{'Softmax' if self.is_softmax else ''} CNN of convs [{', '.join(str(conv) for conv in self.conv_layers)}] and mlp [{str(self.mlp)}]"
